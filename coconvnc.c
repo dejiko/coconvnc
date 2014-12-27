@@ -1,6 +1,7 @@
 
 /*
  * Copyright (C) 2007 - Mateus Cesar Groess
+ * Copyright (C) 2014 SHIMADA Hirofumi
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -188,8 +189,12 @@ static void request_screen_refresh (GtkMenuItem *menuitem,
 static void send_f8 (GtkMenuItem *menuitem,
                      gpointer     user_data)
 {
-	SendKeyEvent(cl, XK_F8, TRUE);
-	SendKeyEvent(cl, XK_F8, FALSE);
+	SendKeyEvent(cl, XK_Control_L, TRUE);
+	SendKeyEvent(cl, XK_Alt_L, TRUE);
+	SendKeyEvent(cl, XK_Return, TRUE);
+	SendKeyEvent(cl, XK_Alt_L, FALSE);
+	SendKeyEvent(cl, XK_Control_L, FALSE);
+	SendKeyEvent(cl, XK_Return, FALSE);
 }
 
 static void send_crtl_alt_del (GtkMenuItem *menuitem,
@@ -201,6 +206,12 @@ static void send_crtl_alt_del (GtkMenuItem *menuitem,
 	SendKeyEvent(cl, XK_Alt_L, FALSE);
 	SendKeyEvent(cl, XK_Control_L, FALSE);
 	SendKeyEvent(cl, XK_Delete, FALSE);
+}
+
+static void disconn (GtkMenuItem *menuitem,
+                     gpointer     user_data)
+{
+	g_signal_emit_by_name (G_OBJECT (window), "destroy");
 }
 
 static void show_connect_window(int argc, char **argv)
@@ -270,9 +281,15 @@ static void show_popup_menu()
 	gtk_widget_show (menu_item);
 	gtk_menu_shell_append (GTK_MENU_SHELL (popup_menu), menu_item);
 
-	menu_item = gtk_menu_item_new_with_label ("Send F8");
+	menu_item = gtk_menu_item_new_with_label ("Send ctrl-alt-enter");
 	g_signal_connect (G_OBJECT (menu_item), "activate",
 	                  G_CALLBACK (send_f8), NULL);
+	gtk_widget_show (menu_item);
+	gtk_menu_shell_append (GTK_MENU_SHELL (popup_menu), menu_item);
+
+	menu_item = gtk_menu_item_new_with_label ("Disconnect");
+	g_signal_connect (G_OBJECT (menu_item), "activate",
+	                  G_CALLBACK (disconn), NULL);
 	gtk_widget_show (menu_item);
 	gtk_menu_shell_append (GTK_MENU_SHELL (popup_menu), menu_item);
 
@@ -344,17 +361,25 @@ static rfbKeySym gdkKey2rfbKeySym(guint keyval)
 	case GDK_Alt_L: k = XK_Alt_L; break;
 	case GDK_Meta_R: k = XK_Meta_R; break;
 	case GDK_Meta_L: k = XK_Meta_L; break;
-#if 0
+
 	/* TODO: find out keysyms */
-	case GDK_Super_L: k = XK_LSuper; break;      /* left "windows" key */
-	case GDK_Super_R: k = XK_RSuper; break;      /* right "windows" key */
-	case GDK_Multi_key: k = XK_Compose; break;
-#endif
+	case GDK_Super_L: k = XK_Super_L; break;      /* left "windows" key */
+	case GDK_Super_R: k = XK_Super_R; break;      /* right "windows" key */
+	/* case GDK_Multi_key: k = XK_Compose; break; */
+
 	case GDK_Mode_switch: k = XK_Mode_switch; break;
 	case GDK_Help: k = XK_Help; break;
 	case GDK_Print: k = XK_Print; break;
 	case GDK_Sys_Req: k = XK_Sys_Req; break;
 	case GDK_Break: k = XK_Break; break;
+
+	case GDK_Zenkaku_Hankaku: k = XK_Zenkaku_Hankaku; break;
+	case GDK_Muhenkan: k = XK_Muhenkan; break;
+	case GDK_Henkan: k = XK_Henkan; break;
+	case GDK_Hiragana_Katakana: k = XK_Hiragana_Katakana; break;
+	case GDK_Menu: k = XK_Menu; break;
+	case GDK_Kanji: k = XK_Kanji; break;
+
 	default: break;
 	}
 	if (k == 0) {
@@ -370,7 +395,10 @@ static rfbKeySym gdkKey2rfbKeySym(guint keyval)
 static gboolean key_event (GtkWidget *widget, GdkEventKey *event,
                                  gpointer user_data)
 {
-	if ((event->type == GDK_KEY_PRESS) && (event->keyval == GDK_F8))
+	if ((event->type == GDK_KEY_PRESS) &&
+	    (event->state & GDK_CONTROL_MASK) &&
+            (event->state & GDK_MOD1_MASK) &&
+	    (event->keyval == GDK_Return))
 		show_popup_menu();
 	else
 		SendKeyEvent(cl, gdkKey2rfbKeySym (event->keyval),
@@ -598,7 +626,7 @@ static void GtkDefaultLog (const char *format, ...)
 
 static char * get_password (rfbClient *client)
 {
-	GtkWidget *dialog, *entry;
+	GtkWidget *dialog, *entry, *label;
 	char *password;
 
 	gtk_widget_destroy (dialog_connecting);
@@ -613,13 +641,17 @@ static char * get_password (rfbClient *client)
 	                                       GTK_RESPONSE_ACCEPT,
 	                                       NULL);
 	entry = gtk_entry_new ();
+	label = gtk_label_new ("Please input password.");
 	gtk_entry_set_visibility (GTK_ENTRY (entry),
 	                          FALSE);
 	g_signal_connect (GTK_OBJECT(entry), "key-press-event",
 	                    G_CALLBACK(on_entry_key_press_event),
 	                    GTK_OBJECT (dialog));
+	gtk_widget_show (label);
 	gtk_widget_show (entry);
 
+	gtk_container_add (GTK_CONTAINER (GTK_DIALOG(dialog)->vbox),
+			   label);
 	gtk_container_add (GTK_CONTAINER (GTK_DIALOG(dialog)->vbox),
 	                   entry);
 	gtk_widget_show (dialog);
@@ -635,6 +667,65 @@ static char * get_password (rfbClient *client)
 	gtk_widget_destroy (dialog);
 	return password;
 }
+
+
+rfbCredential * get_credential (rfbClient* client, int credentialType )
+{
+	GtkWidget *dialog, *entry_user, *entry_pass, *label;
+	rfbCredential *credential = NULL;
+
+	if (credentialType == rfbCredentialTypeUser)
+	{
+		gtk_widget_destroy (dialog_connecting);
+		dialog_connecting = NULL;
+
+		dialog = gtk_dialog_new_with_buttons ("Username and password",
+							NULL,
+							GTK_DIALOG_DESTROY_WITH_PARENT,
+							GTK_STOCK_CANCEL,
+							GTK_RESPONSE_REJECT,
+							GTK_STOCK_OK,
+							GTK_RESPONSE_ACCEPT,
+							NULL);
+		entry_user = gtk_entry_new ();
+		entry_pass = gtk_entry_new ();
+		label = gtk_label_new ("Please input username and password.");
+		gtk_entry_set_visibility (GTK_ENTRY (entry_pass),
+					FALSE);
+		g_signal_connect (GTK_OBJECT(entry_pass), "key-press-event",
+					G_CALLBACK(on_entry_key_press_event),
+					GTK_OBJECT (dialog));
+		gtk_widget_show (entry_user);
+		gtk_widget_show (entry_pass);
+		gtk_widget_show (label);
+
+		gtk_container_add (GTK_CONTAINER (GTK_DIALOG(dialog)->vbox),
+					label);
+		gtk_container_add (GTK_CONTAINER (GTK_DIALOG(dialog)->vbox),
+					entry_user);
+		gtk_container_add (GTK_CONTAINER (GTK_DIALOG(dialog)->vbox),
+					entry_pass);
+		gtk_widget_show (dialog);
+
+		switch (gtk_dialog_run (GTK_DIALOG (dialog))) {
+		case GTK_RESPONSE_ACCEPT:
+			credential = g_malloc (sizeof(rfbCredential));
+
+			credential->userCredential.username = g_strdup (gtk_entry_get_text (GTK_ENTRY (entry_user)));
+			credential->userCredential.password = g_strdup (gtk_entry_get_text (GTK_ENTRY (entry_pass)));
+			break;
+		default:
+			credential = NULL;
+			break;
+		}
+		gtk_widget_destroy (dialog);
+	}else if (credentialType == rfbCredentialTypeX509){
+		/* TODO */
+	}
+
+	return credential;
+}
+
 
 int main (int argc, char *argv[])
 {
@@ -669,6 +760,7 @@ int main (int argc, char *argv[])
 	cl->HandleKeyboardLedState = kbd_leds;
 	cl->HandleTextChat = text_chat;
 	cl->GetPassword = get_password;
+	cl->GetCredential = get_credential;
 
 	show_connect_window (argc, argv);
 
