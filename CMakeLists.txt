@@ -9,3 +9,5 @@ find_package(LibVNCServer REQUIRED)
 add_executable(coconvnc coconvnc.c)
 target_link_libraries(coconvnc ${GTK2_LIBRARIES} ${LIBVNCCLIENT_LIBRARIES})
 include_directories(${GTK2_INCLUDE_DIRS} ${LIBVNCCLIENT_INCLUDE_DIR})
+
+install(TARGETS coconvnc RUNTIME DESTINATION bin)
