@@ -28,17 +28,31 @@
 #include <gdk/gdkx.h>
 #endif
 
+static const gchar * dot_cursor_xpm[] =
+{ "5 5 3 1", " 	c None", ".	c #000000", "+	c #FFFFFF", " ... ", ".+++.", ".+ +.", ".+++.", " ... " };
+static int dot_cursor_x_hot = 2;
+static int dot_cursor_y_hot = 2;
+
 static rfbClient *cl;
 static gchar *server_cut_text = NULL;
 static gboolean framebuffer_allocated = FALSE;
 static GtkWidget *window;
 static GtkWidget *dialog_connecting = NULL;
 
+static gchar *coconvnc_username = NULL;
+
+static GOptionEntry options[] =
+{
+{ "user", 'u', 0, G_OPTION_ARG_STRING, &coconvnc_username, "Username", NULL },
+{ NULL } };
+
 /* Redraw the screen from the backing pixmap */
 static gboolean expose_event (GtkWidget      *widget,
                               GdkEventExpose *event)
 {
 	static GdkImage *image = NULL;
+	GdkCursor *cursor;
+	GdkPixbuf *pixbuf;
 
 	if (framebuffer_allocated == FALSE) {
 
@@ -75,9 +89,11 @@ static gboolean expose_event (GtkWidget      *widget,
 		framebuffer_allocated = TRUE;
 
 		/* Also disable local cursor */
-		GdkCursor* cur = gdk_cursor_new( GDK_BLANK_CURSOR );
-		gdk_window_set_cursor (gtk_widget_get_window(GTK_WIDGET(window)), cur);
-		gdk_cursor_unref( cur );
+                pixbuf = gdk_pixbuf_new_from_xpm_data(dot_cursor_xpm);
+	        cursor = gdk_cursor_new_from_pixbuf(gdk_display_get_default(), pixbuf, dot_cursor_x_hot, dot_cursor_y_hot);
+		g_object_unref(pixbuf);	
+		gdk_window_set_cursor (gtk_widget_get_window(GTK_WIDGET(window)), cursor);
+		gdk_cursor_unref(cursor);
 	}
 
 #ifndef LIBVNCSERVER_CONFIG_LIBVA
@@ -232,7 +248,6 @@ static void show_connect_window(int argc, char **argv)
 	    server = "localhost";
 	else
 	   server = argv[argc-1];
-	snprintf(buf, 255, "Connecting to %s...", server);
 
 	label = gtk_label_new (buf);
 	gtk_widget_show (label);
@@ -673,6 +688,7 @@ rfbCredential * get_credential (rfbClient* client, int credentialType )
 {
 	GtkWidget *dialog, *entry_user, *entry_pass, *label;
 	rfbCredential *credential = NULL;
+	gboolean is_focus_pass = FALSE;
 
 	if (credentialType == rfbCredentialTypeUser)
 	{
@@ -682,13 +698,18 @@ rfbCredential * get_credential (rfbClient* client, int credentialType )
 		dialog = gtk_dialog_new_with_buttons ("Username and password",
 							NULL,
 							GTK_DIALOG_DESTROY_WITH_PARENT,
-							GTK_STOCK_CANCEL,
-							GTK_RESPONSE_REJECT,
 							GTK_STOCK_OK,
 							GTK_RESPONSE_ACCEPT,
+							GTK_STOCK_CANCEL,
+							GTK_RESPONSE_REJECT,
 							NULL);
 		entry_user = gtk_entry_new ();
 		entry_pass = gtk_entry_new ();
+		if ( coconvnc_username != NULL && strlen(coconvnc_username) > 0 ){
+			gtk_entry_set_text (GTK_ENTRY(entry_user), coconvnc_username );
+			is_focus_pass = TRUE;
+		}
+
 		label = gtk_label_new ("Please input username and password.");
 		gtk_entry_set_visibility (GTK_ENTRY (entry_pass),
 					FALSE);
@@ -705,6 +726,10 @@ rfbCredential * get_credential (rfbClient* client, int credentialType )
 					entry_user);
 		gtk_container_add (GTK_CONTAINER (GTK_DIALOG(dialog)->vbox),
 					entry_pass);
+
+		if ( is_focus_pass == TRUE )
+			gtk_widget_grab_focus(entry_pass);
+
 		gtk_widget_show (dialog);
 
 		switch (gtk_dialog_run (GTK_DIALOG (dialog))) {
@@ -731,11 +756,27 @@ int main (int argc, char *argv[])
 {
 	int i;
 	GdkImage *image;
+	GOptionContext *context;
+	GError *error = NULL;
+	gboolean parse_stat;
 
 	rfbClientLog = GtkDefaultLog;
 	rfbClientErr = GtkErrorLog;
 
 	gtk_init (&argc, &argv);
+
+	/* Parse option */
+	context = g_option_context_new("- Tiny VNC Client");
+	g_option_context_add_main_entries(context, options, NULL);
+	g_option_context_set_help_enabled(context, FALSE);
+	parse_stat = g_option_context_parse(context, &argc, &argv, &error);
+//	g_strfreev(argv);
+
+	if (parse_stat == FALSE)
+	{
+		g_print("Parse failed %s\n", error->message);
+		return 1;
+	}
 
 	/* create a dummy image just to make use of its properties */
 	image = gdk_image_new (GDK_IMAGE_FASTEST, gdk_visual_get_system(),
